@@ -13,10 +13,6 @@ provider "aws" {
     region="us-west-2"
 }
 
-resource "aws_ecr_repository" "my_first_ecr_repo" {
-  name = "c2-g4-tf-ecr-repo" # Naming my repository
-}
-
 ################################################################
 #                                                              #
 # CREATE IAM ROLES                                             #
@@ -129,6 +125,107 @@ resource "aws_iam_policy" "iam_policy_for_lambda" {
 }
 EOF
 }
+
+# we initially used an aws_iam_role_policy
+resource "aws_iam_policy" "codebuild_policy" {
+  
+  name = "c2-g4-tf-codebuild-policy"
+  path = "/"
+  description  = "AWS IAM Policy for running CodebBuild"  
+  #role = aws_iam_role.codebuild_role.id
+ 
+ policy = <<EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:logs:us-west-2:962804699607:log-group:/aws/codebuild/c2-g4-tf-codebuild",
+                "arn:aws:logs:us-west-2:962804699607:log-group:/aws/codebuild/c2-g4-tf-codebuild:*"
+            ],
+            "Action": [
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents"
+            ]
+        },
+        {
+            "Effect": "Allow",
+            "Resource": [
+                "${aws_s3_bucket.codepipeline_bucket.arn}",
+                "${aws_s3_bucket.codepipeline_bucket.arn}/*"
+            ],
+            "Action": [
+                "s3:PutObject",
+                "s3:GetObject",
+                "s3:GetObjectVersion",
+                "s3:GetBucketAcl",
+                "s3:GetBucketLocation"
+            ]
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "codebuild:CreateReportGroup",
+                "codebuild:CreateReport",
+                "codebuild:UpdateReport",
+                "codebuild:BatchPutTestCases",
+                "codebuild:BatchPutCodeCoverages"
+            ],
+            "Resource": [
+                "arn:aws:codebuild:us-west-2:962804699607:report-group/c2-g4-tf-codebuild-*"
+            ]
+        }
+    ]
+}
+EOF
+}
+
+resource "aws_iam_policy" "codepipeline_policy" {
+  
+  name = "c2-g4-tf-codepipeline-policy"
+  path = "/"  
+   description  = "AWS IAM Policy for managing codepipeline"
+  #role = aws_iam_role.codepipeline_role.id
+ 
+ policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect":"Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:GetObjectVersion",
+        "s3:GetBucketVersioning",
+        "s3:PutObjectAcl",
+        "s3:PutObject"
+      ],
+      "Resource": [
+        "${aws_s3_bucket.codepipeline_bucket.arn}",
+        "${aws_s3_bucket.codepipeline_bucket.arn}/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "codestar-connections:UseConnection"
+      ],
+      "Resource":"arn:aws:codestar-connections:us-west-2:962804699607:connection/90bf0db7-428f-4ee9-acba-6ebe7a54cc29"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "codebuild:BatchGetBuilds",
+        "codebuild:StartBuild"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+EOF
+}
  
 
 ################################################################
@@ -139,7 +236,7 @@ EOF
 
 resource "aws_iam_role_policy_attachment" "attach_iam_policy_to_iam_role" {
  role         = aws_iam_role.lambda_role.name
- policy_arn   = aws_iam_policy.iam_policy_for_lambda.arn
+ policy_arn   = aws_iam_policy.iam_policy_for_lambda.arn # this, from above, could porbably be replaced by a standard AWS lambda policy or role?
 }
 
 resource "aws_iam_role_policy_attachment" "lambda_basic" {
@@ -151,7 +248,16 @@ resource "aws_iam_role_policy_attachment" "attach_policy_to_codebuild_role" {
   policy_arn  = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser"
   role        = aws_iam_role.codebuild_role.name
 }
- 
+
+resource "aws_iam_role_policy_attachment" "attach_policy_to_codepipeline_role" {
+  policy_arn  = aws_iam_policy.codepipeline_policy.arn
+  role        = aws_iam_role.codepipeline_role.name
+} 
+
+resource "aws_iam_role_policy_attachment" "attach_cb_policy_to_codebuild_role" {
+  policy_arn  = aws_iam_policy.codebuild_policy.arn
+  role        = aws_iam_role.codebuild_role.name
+}
 
 ################################################################
 #                                                              #
@@ -188,7 +294,7 @@ data "archive_file" "zip_the_python_code" {
   output_path = "${path.module}/python/lambda_function.zip"
 }
 
-# then define the lambda itself using our zip file defined above
+# then define the lambda itself, and logic using our zip file defined above
 resource "aws_lambda_function" "terraform_lambda_func" {
   filename                       = "${path.module}/python/lambda_function.zip"
   function_name                  = "c2-g4-tf-get-to-do"
@@ -204,7 +310,7 @@ resource "aws_lambda_function" "terraform_lambda_func" {
 #                                                              #
 ################################################################ 
 
-# the basics
+# the basics, create the resource
 resource "aws_api_gateway_rest_api" "my_api" {
 
   name = "c2-g4-tf-todo-api"
@@ -216,7 +322,6 @@ resource "aws_api_gateway_rest_api" "my_api" {
   
 }
 
-#CREATE THE API GATEWAY
 # define the path to the endpoint
 resource "aws_api_gateway_resource" "root" {
   rest_api_id = aws_api_gateway_rest_api.my_api.id
@@ -224,7 +329,6 @@ resource "aws_api_gateway_resource" "root" {
   path_part = "get-todo"
 }
 
-#CREATE THE API GATEWAY
 # define a method for our resource/path defined above to be hit by our users
 resource "aws_api_gateway_method" "proxy" {
   rest_api_id = aws_api_gateway_rest_api.my_api.id
@@ -233,7 +337,6 @@ resource "aws_api_gateway_method" "proxy" {
   authorization = "NONE"
 }
 
-#CREATE THE API GATEWAY
 # define the handoff from the gateway to the lambda
 # - note the integration_http_method below is POST though we receive a GET above
 # - the gateway METHOD above can accept any http_method and we're receiving a GET from the user
@@ -247,8 +350,6 @@ resource "aws_api_gateway_integration" "lambda_integration" {
   uri = aws_lambda_function.terraform_lambda_func.invoke_arn
 }
 
-
-#CREATE THE API GATEWAY
 # define the response from the lambda back to the gateway
 # - note the response_templates definition, which was required before we could get this API fully working
 resource "aws_api_gateway_integration_response" "proxy" {
@@ -267,7 +368,6 @@ resource "aws_api_gateway_integration_response" "proxy" {
   ]
 }
 
-#CREATE THE API GATEWAY
 # define the response from the gateway back to the user
 resource "aws_api_gateway_method_response" "proxy" {
   rest_api_id = aws_api_gateway_rest_api.my_api.id
@@ -277,7 +377,6 @@ resource "aws_api_gateway_method_response" "proxy" {
 
 }
 
-#CREATE THE API GATEWAY
 # define the stage for the gateway
 resource "aws_api_gateway_deployment" "deployment" {
   depends_on = [
@@ -289,8 +388,12 @@ resource "aws_api_gateway_deployment" "deployment" {
   stage_name = "prod"
 }
 
-#CREATE THE API GATEWAY
-# connect our gateway with our lambda
+################################################################
+#                                                              #
+# CONNECT OUR GATEWAY TO OUR LAMBDA                            #
+#                                                              #
+################################################################ 
+
 resource "aws_lambda_permission" "apigw_lambda" {
   statement_id = "AllowExecutionFromAPIGateway"
   action = "lambda:InvokeFunction"
@@ -298,4 +401,132 @@ resource "aws_lambda_permission" "apigw_lambda" {
   principal = "apigateway.amazonaws.com"
 
   source_arn = "${aws_api_gateway_rest_api.my_api.execution_arn}/*/GET/get-todo"
+}
+
+################################################################
+#                                                              #
+# CREATE OUR REPO                                              #
+#                                                              #
+################################################################ 
+
+resource "aws_ecr_repository" "my_first_ecr_repo" {
+  name = "c2-g4-tf-ecr-repo" # Naming my repository
+}
+
+
+################################################################
+#                                                              #
+# CREATE CODEBUILD                                             #
+#                                                              #
+################################################################ 
+
+resource "aws_codebuild_project" "codebuild_definition" {
+  name         = "c2-g4-tf-codebuild"
+  description  = "CodeBuild built from terraform"
+  service_role = aws_iam_role.codebuild_role.arn
+ 
+  artifacts {
+    type = "NO_ARTIFACTS"
+  }
+ 
+  environment {
+    compute_type                = "BUILD_GENERAL1_SMALL"
+    image                       = "aws/codebuild/standard:3.0"
+    type                        = "LINUX_CONTAINER"
+    image_pull_credentials_type = "CODEBUILD"
+ 
+    privileged_mode = true
+ 
+    environment_variable {
+      name  = "AWS_ACCOUNT_ID"
+      value = "962804699607"
+    }
+    environment_variable {
+      name  = "AWS_DEFAULT_REGION"
+      value = "us-west-2"
+    }
+    environment_variable {
+      name  = "IMAGE_REPO_NAME"
+      value = aws_ecr_repository.my_first_ecr_repo.id
+    }
+    environment_variable {
+      name  = "IMAGE_TAG"
+      value = "latest"
+    }
+/*    environment_variable {
+      name  = "CLUSTER_NAME"
+      value = aws_ecs_cluster.arev-tf-cp2-cluster.id
+    }
+    environment_variable {
+      name  = "SERVICE_NAME"
+      value = aws_ecs_service.arev-tf-cp2_service.id
+    }*/
+  }
+ 
+  source {
+    type            = "GITHUB"
+    location        = "https://github.com/mierj2/react-new-todo"
+    git_clone_depth = 1
+  }
+  
+}
+ 
+ 
+################################################################
+#                                                              #
+# CREATE CODE PIPELINE                                         #
+#                                                              #
+################################################################ 
+
+# create the bucket itself
+resource "aws_s3_bucket" "codepipeline_bucket" {
+	
+	bucket 	= "c2-g4-tf-artifact-store-us-west-2-962804699607"
+
+}
+
+resource "aws_codepipeline" "pipeline_definition" {
+  name     = "c2-g4-tf-codepipeline"
+  role_arn = aws_iam_role.codepipeline_role.arn
+ 
+  artifact_store {
+    location = aws_s3_bucket.codepipeline_bucket.bucket
+    type     = "S3"
+  }
+ 
+  stage {
+    name = "Source"
+ 
+    action {
+      name             = "Source"
+      category         = "Source"
+      owner            = "AWS"
+      provider         = "CodeStarSourceConnection"
+      version          = "1"
+      run_order        = 1
+      output_artifacts = ["source_output"]
+ 
+      configuration = {
+        "ConnectionArn"    = "arn:aws:codestar-connections:us-west-2:962804699607:connection/90bf0db7-428f-4ee9-acba-6ebe7a54cc29" #TODO: this is hardcoded, from manual console work
+        "FullRepositoryId" = "mierj2/react-new-todo"
+        "BranchName"       = "main"
+      }
+    }
+  }
+ 
+  stage {
+    name = "Build"
+ 
+    action {
+      name            = "Build"
+      category        = "Build"
+      owner           = "AWS"
+      provider        = "CodeBuild"
+      input_artifacts = ["source_output"]
+      version         = "1"
+      configuration = {
+        "ProjectName" = aws_codebuild_project.codebuild_definition.id
+      }
+    }
+  }
 }
