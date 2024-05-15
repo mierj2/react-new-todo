@@ -17,8 +17,11 @@ resource "aws_ecr_repository" "my_first_ecr_repo" {
   name = "c2-g4-tf-ecr-repo" # Naming my repository
 }
 
-
-#CREATING IAM ROLES
+################################################################
+#                                                              #
+# CREATE IAM ROLES                                             #
+#                                                              #
+################################################################
 
 resource "aws_iam_role" "lambda_role" {
 name   = "c2-g4-tf-lambda-role"
@@ -82,7 +85,13 @@ resource "aws_iam_role" "codepipeline_role" {
   
 }
 
-# CREATE CUSTOM POLICIES
+
+################################################################
+#                                                              #
+# CREATE CUSTOM POLICIES                                       #
+#                                                              #
+################################################################
+
 # this could porbably be replaced by a standard AWS lambda policy or role?
 resource "aws_iam_policy" "iam_policy_for_lambda" {
  
@@ -121,7 +130,12 @@ resource "aws_iam_policy" "iam_policy_for_lambda" {
 EOF
 }
  
-#ATTACH POLICIES TO ROLES
+
+################################################################
+#                                                              #
+# ATTACH POLICIES TO ROLES                                     #
+#                                                              #
+################################################################
 
 resource "aws_iam_role_policy_attachment" "attach_iam_policy_to_iam_role" {
  role         = aws_iam_role.lambda_role.name
@@ -138,7 +152,13 @@ resource "aws_iam_role_policy_attachment" "attach_policy_to_codebuild_role" {
   role        = aws_iam_role.codebuild_role.name
 }
  
-# CREATE S3 BUCKET FOR TODO-DATA.JSON
+
+################################################################
+#                                                              #
+# CREATE S3 BUCKET TO STORE TODO-DATA.JSON                     #
+#                                                              #
+################################################################ 
+ 
 # create the bucket itself
 resource "aws_s3_bucket" "to_do_list_bucket" {
 	
@@ -146,7 +166,6 @@ resource "aws_s3_bucket" "to_do_list_bucket" {
 
 }
 
-# CREATE S3 BUCKET FOR TODO-DATA.JSON
 # create an object in the bucket, which will be our json file
 resource "aws_s3_bucket_object" "object" {
 
@@ -156,7 +175,12 @@ resource "aws_s3_bucket_object" "object" {
 
 }
 
-# CREATE THE LAMBDA
+################################################################
+#                                                              #
+# CREATE LAMBDA                                                #
+#                                                              #
+################################################################ 
+
 # first zip the lambda_function code
 data "archive_file" "zip_the_python_code" {
   type        = "zip"
@@ -164,7 +188,6 @@ data "archive_file" "zip_the_python_code" {
   output_path = "${path.module}/python/lambda_function.zip"
 }
 
-#CREATE THE LAMBDA
 # then define the lambda itself using our zip file defined above
 resource "aws_lambda_function" "terraform_lambda_func" {
   filename                       = "${path.module}/python/lambda_function.zip"
@@ -175,7 +198,12 @@ resource "aws_lambda_function" "terraform_lambda_func" {
   depends_on                     = [aws_iam_role_policy_attachment.attach_iam_policy_to_iam_role]
 }
 
-#CREATE THE API GATEWAY
+################################################################
+#                                                              #
+# CREATE THE API GATEWAY                                       #
+#                                                              #
+################################################################ 
+
 # the basics
 resource "aws_api_gateway_rest_api" "my_api" {
 
