@@ -405,7 +405,7 @@ resource "aws_lambda_permission" "apigw_lambda" {
 
 ################################################################
 #                                                              #
-# CREATE OUR REPO                                              #
+# CREATE OUR ECR REPO                                          #
 #                                                              #
 ################################################################ 
 
@@ -474,7 +474,7 @@ resource "aws_codebuild_project" "codebuild_definition" {
  
 ################################################################
 #                                                              #
-# CREATE CODE PIPELINE                                         #
+# CREATE CODEPIPELINE                                          #
 #                                                              #
 ################################################################ 
 
