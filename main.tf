@@ -31,6 +31,8 @@ resource "aws_s3_bucket_object" "object" {
 
 }
 
+#CREATING IAM ROLES
+
 resource "aws_iam_role" "lambda_role" {
 name   = "c2-g4-tf-lambda-role"
 assume_role_policy = jsonencode({
@@ -48,6 +50,30 @@ assume_role_policy = jsonencode({
   })
 
 }
+
+resource "aws_iam_role" "codebuild_role" {
+  
+  name   = "c2-g4-tf-codebuild-role"
+  assume_role_policy = jsonencode({
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "sts:AssumeRole"
+            ],
+            "Principal": {
+                "Service": [
+                    "codebuild.amazonaws.com"
+                ]
+            }
+        }
+    ]
+  })
+  
+}
+
+# CREATE CUSTOM POLICIES
 
 resource "aws_iam_policy" "iam_policy_for_lambda" {
  
@@ -86,9 +112,21 @@ resource "aws_iam_policy" "iam_policy_for_lambda" {
 EOF
 }
  
+#ATTACH POLICIES TO ROLES
+
 resource "aws_iam_role_policy_attachment" "attach_iam_policy_to_iam_role" {
- role        = aws_iam_role.lambda_role.name
- policy_arn  = aws_iam_policy.iam_policy_for_lambda.arn
+ role         = aws_iam_role.lambda_role.name
+ policy_arn   = aws_iam_policy.iam_policy_for_lambda.arn
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_basic" {
+  policy_arn  = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+  role        = aws_iam_role.lambda_role.name
+}
+
+resource "aws_iam_role_policy_attachment" "attach_policy_to_codebuild_role" {
+  policy_arn  = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser"
+  role        = aws_iam_role.codebuild_role.name
 }
  
 data "archive_file" "zip_the_python_code" {
@@ -134,7 +172,7 @@ resource "aws_api_gateway_integration" "lambda_integration" {
   rest_api_id = aws_api_gateway_rest_api.my_api.id
   resource_id = aws_api_gateway_resource.root.id
   http_method = aws_api_gateway_method.proxy.http_method
-  integration_http_method = "GET"
+  integration_http_method = "POST"
   type = "AWS"
   uri = aws_lambda_function.terraform_lambda_func.invoke_arn
 }
@@ -144,6 +182,7 @@ resource "aws_api_gateway_method_response" "proxy" {
   resource_id = aws_api_gateway_resource.root.id
   http_method = aws_api_gateway_method.proxy.http_method
   status_code = "200"
+
 }
 
 resource "aws_api_gateway_integration_response" "proxy" {
@@ -151,6 +190,10 @@ resource "aws_api_gateway_integration_response" "proxy" {
   resource_id = aws_api_gateway_resource.root.id
   http_method = aws_api_gateway_method.proxy.http_method
   status_code = aws_api_gateway_method_response.proxy.status_code
+  
+   response_templates = {
+       "application/json" = ""
+   }   
 
   depends_on = [
     aws_api_gateway_method.proxy,
@@ -169,7 +212,7 @@ resource "aws_api_gateway_integration" "lambda_integration_options" {
   rest_api_id = aws_api_gateway_rest_api.my_api.id
   resource_id = aws_api_gateway_resource.root.id
   http_method = aws_api_gateway_method.proxy_options.http_method
-  integration_http_method = "OPTIONS"
+  integration_http_method = "POST"
   type = "MOCK"
 }
 
@@ -202,10 +245,6 @@ resource "aws_api_gateway_deployment" "deployment" {
   stage_name = "prod"
 }
 
-resource "aws_iam_role_policy_attachment" "lambda_basic" {
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-  role = aws_iam_role.lambda_role.name
-}
 
 resource "aws_lambda_permission" "apigw_lambda" {
   statement_id = "AllowExecutionFromAPIGateway"
