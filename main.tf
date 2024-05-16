@@ -215,6 +215,23 @@ resource "aws_iam_policy" "codepipeline_policy" {
 {
   "Version": "2012-10-17",
   "Statement": [
+      {
+        "Action": [
+            "iam:PassRole"
+        ],
+        "Resource": "*",
+        "Effect": "Allow",
+        "Condition": {
+            "StringEqualsIfExists": {
+                "iam:PassedToService": [
+                    "cloudformation.amazonaws.com",
+                    "elasticbeanstalk.amazonaws.com",
+                    "ec2.amazonaws.com",
+                    "ecs-tasks.amazonaws.com"
+                ]
+            }
+        }
+    },
     {
       "Effect":"Allow",
       "Action": [
@@ -403,6 +420,9 @@ resource "aws_api_gateway_integration_response" "proxy" {
   resource_id = aws_api_gateway_resource.root.id
   http_method = aws_api_gateway_method.proxy.http_method
   status_code = aws_api_gateway_method_response.proxy.status_code
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin"  = "'*'"
+  }
   
    response_templates = {
        "application/json" = ""
@@ -420,18 +440,93 @@ resource "aws_api_gateway_method_response" "proxy" {
   resource_id = aws_api_gateway_resource.root.id
   http_method = aws_api_gateway_method.proxy.http_method
   status_code = "200"
+  response_models = {
+    "application/json" = "Empty"
+  }
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin"  = true
+  }
 
 }
 
+##################!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+# OPTIONS HTTP method.
+resource "aws_api_gateway_method" "options" {
+  rest_api_id      = aws_api_gateway_rest_api.my_api.id
+  resource_id      = aws_api_gateway_resource.root.id
+  http_method      = "OPTIONS"
+  authorization    = "NONE"
+  api_key_required = false
+}
+
+
+# OPTIONS integration.
+resource "aws_api_gateway_integration" "options" {
+  rest_api_id          = aws_api_gateway_rest_api.my_api.id
+  resource_id          = aws_api_gateway_resource.root.id
+  http_method          = "OPTIONS"
+  type                 = "MOCK"
+  passthrough_behavior = "WHEN_NO_MATCH"
+  request_templates = {
+    "application/json" : "{\"statusCode\": 200}"
+  }
+}
+ 
+### LAMBDA DOES ITS THING HERE 
+ 
+# OPTIONS integration response.
+resource "aws_api_gateway_integration_response" "options" {
+  rest_api_id = aws_api_gateway_rest_api.my_api.id
+  resource_id = aws_api_gateway_resource.root.id
+  http_method = aws_api_gateway_integration.options.http_method
+  status_code = "200"
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+    "method.response.header.Access-Control-Allow-Methods" = "'OPTIONS'"
+    "method.response.header.Access-Control-Allow-Origin"  = "'*'"
+  }
+}
+
+# OPTIONS method response.
+resource "aws_api_gateway_method_response" "options" {
+  rest_api_id = aws_api_gateway_rest_api.my_api.id
+  resource_id = aws_api_gateway_resource.root.id
+  http_method = aws_api_gateway_method.options.http_method
+  status_code = "200"
+  response_models = {
+    "application/json" = "Empty"
+  }
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = true 
+    "method.response.header.Access-Control-Allow-Methods" = true
+    "method.response.header.Access-Control-Allow-Origin"  = true
+  }
+}
+
+
+#####################
+
+
 # define the stage for the gateway
 resource "aws_api_gateway_deployment" "deployment" {
+
+  triggers = { 
+    redeployment = sha1(jsonencode(aws_api_gateway_rest_api.my_api.body)) 
+  } 
+  
+  lifecycle { 
+    create_before_destroy = true 
+  }
+
   depends_on = [
     aws_api_gateway_integration.lambda_integration,
-    #aws_api_gateway_integration.lambda_integration_options, # Add this line if we return the OPTIONS method back to our resource/path
+    aws_api_gateway_integration.options # Add this line if we return the OPTIONS method back to our resource/path
   ]
 
   rest_api_id = aws_api_gateway_rest_api.my_api.id
   stage_name = "prod"
+  stage_description = "API Gateway Deployment v1"
 }
 
 ################################################################
