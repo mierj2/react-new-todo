@@ -232,6 +232,13 @@ resource "aws_iam_policy" "codepipeline_policy" {
     {
       "Effect": "Allow",
       "Action": [
+        "ecs:*"
+      ],
+      "Resource":"*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
         "codestar-connections:UseConnection"
       ],
       "Resource":"arn:aws:codestar-connections:us-west-2:962804699607:connection/90bf0db7-428f-4ee9-acba-6ebe7a54cc29"
@@ -243,7 +250,19 @@ resource "aws_iam_policy" "codepipeline_policy" {
         "codebuild:StartBuild"
       ],
       "Resource": "*"
-    }
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "codedeploy:CreateDeployment",
+        "codedeploy:GetApplication",
+        "codedeploy:GetApplicationRevision",
+        "codedeploy:GetDeployment",
+        "codedeploy:GetDeploymentConfig",
+        "codedeploy:RegisterApplicationRevision"
+      ],
+      "Resource": "*"
+    }    
   ]
 }
 EOF
@@ -498,174 +517,3 @@ resource "aws_codebuild_project" "codebuild_definition" {
   
 }
  
- 
-# ################################################################
-# #                                                              #
-# # CREATE CODEPIPELINE                                          #
-# #                                                              #
-# ################################################################ 
-
-# # create the bucket itself
-# resource "aws_s3_bucket" "codepipeline_bucket" {
-	
-# 	bucket 	= "c2-g4-tf-artifact-store-us-west-2-962804699607"
-
-# }
-
-# resource "aws_codepipeline" "pipeline_definition" {
-#   name     = "c2-g4-tf-codepipeline"
-#   role_arn = aws_iam_role.codepipeline_role.arn
- 
-#   artifact_store {
-#     location = aws_s3_bucket.codepipeline_bucket.bucket
-#     type     = "S3"
-#   }
- 
-#   stage {
-#     name = "Source"
- 
-#     action {
-#       name             = "Source"
-#       category         = "Source"
-#       owner            = "AWS"
-#       provider         = "CodeStarSourceConnection"
-#       version          = "1"
-#       run_order        = 1
-#       output_artifacts = ["source_output"]
- 
-#       configuration = {
-#         "ConnectionArn"    = "arn:aws:codestar-connections:us-west-2:962804699607:connection/90bf0db7-428f-4ee9-acba-6ebe7a54cc29" #TODO: this is hardcoded, from manual-created console implementation
-#         "FullRepositoryId" = "mierj2/react-new-todo"
-#         "BranchName"       = "main"
-#       }
-#     }
-#   }
- 
-#   stage {
-#     name = "Build"
- 
-#     action {
-#       name            = "Build"
-#       category        = "Build"
-#       owner           = "AWS"
-#       provider        = "CodeBuild"
-#       input_artifacts = ["source_output"]
-#       output_artifacts = ["BuildArtifact"]
-#       version         = "1"
-#       configuration = {
-#         "ProjectName" = aws_codebuild_project.codebuild_definition.id
-#       }
-#     }
-#   }
-  
-#   stage {
-#     name = "Deploy"
- 
-#     action {
-#       name            = "Deploy"
-#       category        = "Deploy"
-#       owner           = "AWS"
-#       provider        = "ECS"
-#       input_artifacts = ["BuildArtifact"]
-#       version         = "1"
-#       configuration = {
-
-#         ClusterName = aws_ecs_cluster.cluster_definition.name
-#         ServiceName = aws_ecs_service.service_definition.name
-#         FileName = "imagedefinitions.json"
-#         #DeploymentTimeout
-
-#       }
-#     }
-#   }  
-  
-# }
- 
-# ################################################################
-# #                                                              #
-# # CREATE ECS ELEMENTS                                          #
-# #                                                              #
-# ################################################################ 
-
-# resource "aws_ecs_cluster" "cluster_definition" {
-
-#   name = "c2-g4-tf-ecs-cluster"
-
-# }
-
-# resource "aws_ecs_cluster_capacity_providers" "providers_definition" {
-
-#   cluster_name = aws_ecs_cluster.cluster_definition.name
-
-#   capacity_providers = ["FARGATE"]
-
-#   default_capacity_provider_strategy {
-#     base              = 1
-#     weight            = 100
-#     capacity_provider = "FARGATE"
-#   }
-  
-# }
-
-# resource "aws_ecs_task_definition" "task_definition" {
-
-#   family = "c2-g4-tf-ecs-task-definition"
-#   container_definitions = jsonencode([
-#     {
-#       name      = "c2-g4-tf-ecs-container"
-#       image     = "962804699607.dkr.ecr.us-west-2.amazonaws.com/c2-g4-tf-ecr-repo"
-#       requires_compatibilities = ["FARGATE"] # Stating that we are using ECS Fargate
-#       network_mode             = "awsvpc"    # Using awsvpc as our network mode as this is required for Fargate
-#       execution_role_arn       = aws_iam_role.ecs_task_role.arn
-#       cpu       = 1
-#       memory    = 3072
-#       essential = true
-#       portMappings = [
-#         {
-#           containerPort = 80
-#           hostPort      = 80
-#         }
-#       ]
-#     }
-#   ])
-#   # volume {
-#   #   name      = "service-storage"
-#   #   host_path = "/ecs/service-storage"
-#   # }
-
-#   # placement_constraints {
-#   #   type       = "memberOf"
-#   #   expression = "attribute:ecs.availability-zone in [us-west-2a, us-west-2b]"
-#   # }
-  
-# }
-
-# #https://stackoverflow.com/questions/73383240/error-invalidparameterexception-task-definition-does-not-support-launch-type-f
-
-# resource "aws_ecs_service" "service_definition" {
-
-#   name            = "c2-g4-tf-ecs-service"
-#   cluster         = aws_ecs_cluster.cluster_definition.id
-#   task_definition = aws_ecs_task_definition.task_definition.arn
-#   desired_count   = 1
-#   force_new_deployment = true
-#   launch_type = "FARGATE"
-#   #platform_version ="LATEST"
-
-#   # ordered_placement_strategy {
-#   #   type  = "binpack"
-#   #   field = "cpu"
-#   # }
-
-#   # load_balancer {
-#   #   target_group_arn = aws_lb_target_group.foo.arn
-#   #   container_name   = "mongo"
-#   #   container_port   = 8080
-#   # }
-
-#   # placement_constraints {
-#   #   type       = "memberOf"
-#   #   expression = "attribute:ecs.availability-zone in [us-west-2a, us-west-2b]"
-#   # }
-  
-# }
